@@ -3,7 +3,6 @@ import shutil
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
-from PIL import Image, ImageTk
 import jdatetime
 import csv
 import io
@@ -11,6 +10,18 @@ import io
 from database import add_case, UPLOADS_DIR, update_case, get_case_by_id
 
 CASE_TYPES = ['مزایده', 'مناقصه', 'تفاهم نامه', 'صورت جلسات', 'آموزشی کارگاهی', 'اجاره سالن ها', 'اجاره ورزشی', 'نانوایی', 'بوفه', 'مرکز رشد', 'مشاوره ای', 'پژوهشی', 'رستوران', 'خوابگاه', 'آرایشگاه', 'اماکن مازاد', 'سایر']
+
+# Try to import PIL, handle if not found
+try:
+    from PIL import Image
+    import openpyxl
+    from openpyxl.styles import Font, Border, Side, Alignment
+    from openpyxl.utils import get_column_letter
+    # Bidi support for XLSX
+    import arabic_reshaper
+    from bidi.algorithm import get_display
+except ImportError as e:
+    print(f"Import Error: {e}. Please install required library (Pillow).")
 
 PERSIAN_TO_ENGLISH_MAP = {
     '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
@@ -22,6 +33,132 @@ def convert_persian_to_english(text):
     for p, e in PERSIAN_TO_ENGLISH_MAP.items():
         text = text.replace(p, e)
     return text
+
+class CustomJalaliCalendar(ctk.CTkFrame):
+    """A custom Jalali calendar widget built with customtkinter."""
+    def __init__(self, master, on_select=None, year=None, month=None, day=None):
+        super().__init__(master)
+        self.on_select = on_select
+
+        today = jdatetime.date.today()
+        self.year = year if year else today.year
+        self.month = month if month else today.month
+        self.day = day if day else today.day
+
+        self.month_names = [
+            "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+            "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
+        ]
+        self.weekday_names = ["ش", "ی", "د", "س", "چ", "پ", "ج"]
+
+        # --- Header: Month/Year selection ---
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.pack(pady=5, fill='x')
+        header_frame.grid_columnconfigure(1, weight=1)
+        header_frame.grid_columnconfigure(2, weight=1)
+
+        btn_prev = ctk.CTkButton(header_frame, text=">", width=30, command=self.prev_month)
+        btn_prev.grid(row=0, column=0, padx=5)
+
+        self.year_combo = ctk.CTkComboBox(header_frame, values=[str(y) for y in range(today.year - 10, today.year + 10)], command=self.update_calendar)
+        self.year_combo.set(str(self.year))
+        self.year_combo.grid(row=0, column=1, padx=5, sticky='ew')
+
+        self.month_combo = ctk.CTkComboBox(header_frame, values=self.month_names, command=self.update_calendar)
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.month_combo.grid(row=0, column=2, padx=5, sticky='ew')
+
+        btn_next = ctk.CTkButton(header_frame, text="<", width=30, command=self.next_month)
+        btn_next.grid(row=0, column=3, padx=5)
+
+        # --- Calendar Body ---
+        self.calendar_frame = ctk.CTkFrame(self)
+        self.calendar_frame.pack(expand=True, fill="both", padx=5, pady=5)
+
+        self.create_calendar()
+
+    def create_calendar(self):
+        # Clear previous widgets
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        # Weekday headers
+        for i, name in enumerate(self.weekday_names):
+            self.calendar_frame.grid_columnconfigure(i, weight=1)
+            lbl = ctk.CTkLabel(self.calendar_frame, text=name, font=('vazirmatn', 12, 'bold'))
+            lbl.grid(row=0, column=i, sticky='nsew')
+
+        # Get calendar data
+        first_day_of_month = jdatetime.date(self.year, self.month, 1)
+        start_weekday = first_day_of_month.weekday()  # jdatetime: 0=Saturday, 6=Friday. Matches our grid.
+        days_in_month = jdatetime.j_days_in_month[self.month - 1]
+        if self.month == 12 and not jdatetime.date(self.year, 1, 1).isleap():
+            days_in_month = 29
+
+        day_num = 1
+        for r in range(1, 7): # Max 6 rows
+            self.calendar_frame.grid_rowconfigure(r, weight=1)
+            for c in range(7):
+                if (r == 1 and c < start_weekday) or day_num > days_in_month:
+                    continue
+                
+                btn = ctk.CTkButton(
+                    self.calendar_frame,
+                    text=str(day_num),
+                    command=lambda d=day_num: self.select_date(d)
+                )
+                btn.grid(row=r, column=c, sticky='nsew', padx=1, pady=1)
+                day_num += 1
+
+    def update_calendar(self, event=None):
+        self.year = int(self.year_combo.get())
+        self.month = self.month_names.index(self.month_combo.get()) + 1
+        self.create_calendar()
+
+    def next_month(self):
+        self.month += 1
+        if self.month > 12:
+            self.month = 1
+            self.year += 1
+        self.year_combo.set(str(self.year))
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.update_calendar()
+
+    def prev_month(self):
+        self.month -= 1
+        if self.month < 1:
+            self.month = 12
+            self.year -= 1
+        self.year_combo.set(str(self.year))
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.update_calendar()
+
+    def select_date(self, day):
+        if self.on_select:
+            date_str = f"{self.year}-{self.month:02d}-{day:02d}"
+            self.on_select(date_str)
+
+def open_calendar(master, entry_widget):
+    """Opens a Jalali calendar to select a date and inserts it into the entry_widget."""
+    def on_date_select(date_str):
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, date_str)
+        cal_win.destroy()
+        entry_widget.event_generate('<FocusOut>')
+
+    cal_win = ctk.CTkToplevel(master)
+    cal_win.title("انتخاب تاریخ")
+    cal_win.geometry("400x350")
+    cal_win.resizable(False, False)
+
+    try:
+        current_date_str = entry_widget.get()
+        year, month, day = map(int, current_date_str.split('-'))
+        cal = CustomJalaliCalendar(cal_win, on_select=on_date_select, year=year, month=month, day=day)
+    except (ValueError, IndexError):
+        cal = CustomJalaliCalendar(cal_win, on_select=on_date_select)
+
+    cal.pack(pady=10, padx=10, fill="both", expand=True)
 
 def open_add_record(master):
     """Open the Add Record window using customtkinter.
@@ -92,27 +229,37 @@ def open_add_record(master):
     # --- Row 1: Date and Subject (2-column layout) ---
     date_subject_frame = ctk.CTkFrame(top)
     date_subject_frame.grid(row=1, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
-    date_subject_frame.grid_columnconfigure(0, weight=1)  # Subject expands
-    date_subject_frame.grid_columnconfigure(2, weight=1)  # Date expands
+    date_subject_frame.grid_columnconfigure(0, weight=1) # Subject expands
+    date_subject_frame.grid_columnconfigure(1, weight=0) # Subject label
+    date_subject_frame.grid_columnconfigure(2, weight=0) # Date entry
+    date_subject_frame.grid_columnconfigure(3, weight=0) # Calendar button
+    date_subject_frame.grid_columnconfigure(4, weight=0) # Today button
+    date_subject_frame.grid_columnconfigure(5, weight=0) # Date label
 
     # RTL: Date on right, Subject on left
     lbl_date = ctk.CTkLabel(date_subject_frame, text='تاریخ پرونده', font=font_spec)
-    lbl_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
+    lbl_date.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     def normalize_date_input(event):
         widget = event.widget
         current_text = widget.get()
         new_text = convert_persian_to_english(current_text)
+        # Also trigger duration computation on key release
+        compute_duration_label()
         if current_text != new_text:
             widget.delete(0, tk.END)
             widget.insert(0, new_text)
 
     # Today button (between label and entry)
     btn_today = ctk.CTkButton(date_subject_frame, text='📅 امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=80)
-    btn_today.grid(row=0, column=2, sticky='w', padx=(0, pad))
+    btn_today.grid(row=0, column=4, sticky='e', padx=(0, 4))
+
+    btn_cal_date = ctk.CTkButton(date_subject_frame, text='🗓️', command=lambda: open_calendar(top, entry_date), width=30)
+    btn_cal_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
+
     entry_date = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry, width=150)
     entry_date.grid(row=0, column=2, sticky='e', padx=(0, pad))
-
+    
     def set_today():
         entry_date.delete(0, tk.END)
         entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))
@@ -120,7 +267,7 @@ def open_add_record(master):
     entry_date.bind('<KeyRelease>', normalize_date_input)
 
     lbl_subject = ctk.CTkLabel(date_subject_frame, text='موضوع', font=font_spec)
-    lbl_subject.grid(row=0, column=1, sticky='e', padx=(0, 4))
+    lbl_subject.grid(row=0, column=1, sticky='e', padx=(pad, 4))
     entry_subject = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry)
     entry_subject.grid(row=0, column=0, sticky='ew', padx=(0, pad))
 
@@ -347,23 +494,28 @@ def open_add_record(master):
     # Dedicated row for duration with RTL layout: [calc_label] [تا_entry]
     duration_frame = ctk.CTkFrame(top)
     duration_frame.grid(row=4, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
-    duration_frame.grid_columnconfigure(0, weight=0)
-    duration_frame.grid_columnconfigure(1, weight=1)  # تا Entry expands
-    duration_frame.grid_columnconfigure(2, weight=0)
-    duration_frame.grid_columnconfigure(3, weight=1)  # از Entry expands
-    duration_frame.grid_columnconfigure(4, weight=0)
+    duration_frame.grid_columnconfigure(0, weight=1) # calc label
+    duration_frame.grid_columnconfigure(1, weight=1) # to entry
+    duration_frame.grid_columnconfigure(2, weight=0) # to cal button
+    duration_frame.grid_columnconfigure(3, weight=0) # to label
+    duration_frame.grid_columnconfigure(4, weight=1) # from entry
+    duration_frame.grid_columnconfigure(5, weight=0) # from cal button
+    duration_frame.grid_columnconfigure(6, weight=0) # from label
 
     # RTL layout: from right to left (columns 4, 3, 2, 1, 0)
     lbl_duration_from = ctk.CTkLabel(duration_frame, text='از:', font=font_spec)
-    lbl_duration_from.grid(row=0, column=4, sticky='e', padx=(0, 4))
+    lbl_duration_from.grid(row=0, column=6, sticky='e', padx=(0, 4))
+
+    btn_cal_from = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_from), width=30)
+    btn_cal_from.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     entry_duration_from = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)    
-    entry_duration_from.grid(row=0, column=3, sticky='ew', padx=(0, pad))
+    entry_duration_from.grid(row=0, column=4, sticky='ew', padx=(0, pad))
     entry_duration_from.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_duration_from.bind('<KeyRelease>', normalize_date_input)
 
     lbl_duration_to = ctk.CTkLabel(duration_frame, text='تا:', font=font_spec)
-    lbl_duration_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
+    lbl_duration_to.grid(row=0, column=3, sticky='e', padx=(0, 4))
 
     entry_duration_to = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)
     entry_duration_to.grid(row=0, column=1, sticky='ew', padx=(0, pad))
@@ -371,7 +523,10 @@ def open_add_record(master):
     entry_duration_to.bind('<KeyRelease>', normalize_date_input)
 
     lbl_duration_calc = ctk.CTkLabel(duration_frame, text='', font=('vazirmatn', 12), text_color='#0066cc')
-    lbl_duration_calc.grid(row=0, column=0, sticky='w', padx=(4, 0))
+    lbl_duration_calc.grid(row=0, column=0, sticky='w', padx=(pad, 0))
+
+    btn_cal_to = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_to), width=30)
+    btn_cal_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
 
     def compute_duration_label():
         from_val = entry_duration_from.get().strip()
@@ -449,7 +604,7 @@ def open_add_record(master):
         files = filedialog.askopenfilenames(title='انتخاب فایل‌ها')
         if files:
             selected_files['list'] = list(files)
-            lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد', text_color='black')
+            lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد')
 
     btn_attach = ctk.CTkButton(files_frame, text='📎 افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
     btn_attach.grid(row=0, column=1, sticky='e', padx=(pad, 0))
@@ -457,8 +612,8 @@ def open_add_record(master):
     # Export checkbox (default ON)
     export_var = tk.BooleanVar(value=True)
     chk_export = ctk.CTkCheckBox(
-        files_frame, 
-        text='ایجاد فایل CSV و TXT',
+        files_frame,
+        text='ایجاد فایل XLSX',
         variable=export_var,
         font=('vazirmatn', 11)
     )
@@ -553,7 +708,7 @@ def save_case(top, selected_files, entry_title, entry_date, entry_duration_from,
         'status': status_var.get()
     }
 
-    # Export to CSV and TXT if checkbox is enabled
+    # Export to CSV and XLSX if checkbox is enabled
     if export_var and export_var.get():
         export_case_to_files(data)
 
@@ -588,7 +743,7 @@ def export_case_to_files(data):
             ('موجر', data['mojer']),
             ('مستاجر', data['mostajjer']),
             ('کارفرما', data['karfarma']),
-            ('پیمانکار', data['piman']),
+            ('پیمانکار', data.get('piman', '')),
             ('مبلغ قرارداد', contract_amount_display),
             ('نام صاحب حساب', data['bank_owner_name']),
             ('شماره حساب', data['bank_account_number']),
@@ -603,38 +758,53 @@ def export_case_to_files(data):
             ('توضیحات', data['description']),
         ]
         
-        # Export to CSV - Headers in first row, Values in second row
-        csv_path = os.path.join(folder, f'{case_id}.csv')
-        with open(csv_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.writer(csvfile, delimiter=',', quotechar='"')
-            # First row: all field names (headers)
-            headers = [key for key, value in case_info]
-            writer.writerow(headers)
-            # Second row: all values
-            values = [value or '' for key, value in case_info]
-            writer.writerow(values)
-        
-        # Export to TXT with table format
-        txt_path = os.path.join(folder, f'{case_id}.txt')
-        with open(txt_path, 'w', encoding='utf-8') as txtfile:
-            # Header
-            txtfile.write('=' * 100 + '\n')
-            txtfile.write('سیستم مدیریت پرونده مهاجر - گزارش پرونده'.center(100) + '\n')
-            txtfile.write('=' * 100 + '\n\n')
-            
-            # Case info table
-            txtfile.write('┌' + '─' * 98 + '┐\n')
-            for key, value in case_info:
-                # Truncate long values
-                val_str = str(value or '').replace('\n', ' ')[:80]
-                key_str = str(key)[:20]
-                txtfile.write(f'│ {key_str:<20} │ {val_str:<76} │\n')
-            txtfile.write('└' + '─' * 98 + '┘\n')
-            
-            txtfile.write('\n' + '=' * 100 + '\n')
-            txtfile.write(f'تاریخ تولید: {jdatetime.date.today().strftime("%Y-%m-%d")}\n')
-            txtfile.write('=' * 100 + '\n')
-        
+        # Export to XLSX
+        xlsx_path = os.path.join(folder, f'{case_id}.xlsx')
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        sheet.title = "جزئیات پرونده"
+        sheet.sheet_view.rightToLeft = True
+
+        # --- Styles ---
+        bold_font = Font(name='Vazirmatn', bold=True)
+        regular_font = Font(name='Vazirmatn')
+        thin_border = Border(left=Side(style='thin'), 
+                             right=Side(style='thin'), 
+                             top=Side(style='thin'), 
+                             bottom=Side(style='thin'))
+        center_alignment = Alignment(horizontal='center', vertical='center')
+
+        # --- Data Preparation ---
+        headers = [item[0] for item in case_info]
+        values = [item[1] for item in case_info]
+
+        # Add "Row" column
+        headers.insert(0, 'ردیف')
+        values.insert(0, 1)
+
+        reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in headers]
+        reshaped_values = [get_display(arabic_reshaper.reshape(str(v) if v is not None else '')) for v in values]
+
+        # --- Write to Sheet ---
+        sheet.append(reshaped_headers)
+        sheet.append(reshaped_values)
+
+        # --- Apply Styles and Adjust Widths ---
+        for col_idx, col in enumerate(sheet.columns, 1):
+            max_length = 0
+            column_letter = get_column_letter(col_idx)
+            for cell_idx, cell in enumerate(col):
+                # Apply styles
+                cell.font = bold_font if cell.row == 1 else regular_font
+                cell.border = thin_border
+                cell.alignment = center_alignment
+                # Find max length in column
+                if len(str(cell.value)) > max_length:
+                    max_length = len(str(cell.value))
+            adjusted_width = (max_length + 2) * 1.2
+            sheet.column_dimensions[column_letter].width = adjusted_width
+
+        workbook.save(xlsx_path)
     except Exception as e:
         print(f"Error exporting case files: {e}")
         # Don't block case saving if export fails
@@ -701,24 +871,33 @@ def open_edit_record(master, case_id):
     # Row 1: Date & Subject
     date_subject_frame = ctk.CTkFrame(top)
     date_subject_frame.grid(row=1, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
-    date_subject_frame.grid_columnconfigure(0, weight=1)  # Subject expands
-    date_subject_frame.grid_columnconfigure(2, weight=1)  # Date expands
+    date_subject_frame.grid_columnconfigure(0, weight=1) # Subject expands
+    date_subject_frame.grid_columnconfigure(1, weight=0) # Subject label
+    date_subject_frame.grid_columnconfigure(2, weight=0) # Date entry
+    date_subject_frame.grid_columnconfigure(3, weight=0) # Calendar button
+    date_subject_frame.grid_columnconfigure(4, weight=0) # Today button
+    date_subject_frame.grid_columnconfigure(5, weight=0) # Date label
 
     def normalize_date_input(event):
         widget = event.widget
         current_text = widget.get()
         new_text = convert_persian_to_english(current_text)
+        # Also trigger duration computation on key release
+        compute_duration_label_edit()
         if current_text != new_text:
             widget.delete(0, tk.END)
             widget.insert(0, new_text)
 
     # RTL: Date on right, Subject on left
     lbl_date = ctk.CTkLabel(date_subject_frame, text='تاریخ پرونده', font=font_spec)
-    lbl_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
+    lbl_date.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     # Today button (between label and entry)
     btn_today = ctk.CTkButton(date_subject_frame, text='📅 امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=80)
-    btn_today.grid(row=0, column=2, sticky='w', padx=(0, pad))
+    btn_today.grid(row=0, column=4, sticky='e', padx=(0, 4))
+
+    btn_cal_date = ctk.CTkButton(date_subject_frame, text='🗓️', command=lambda: open_calendar(top, entry_date), width=30)
+    btn_cal_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
 
     entry_date = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry, width=150)
     entry_date.grid(row=0, column=2, sticky='e', padx=(0, pad))
@@ -726,7 +905,7 @@ def open_edit_record(master, case_id):
     entry_date.bind('<KeyRelease>', normalize_date_input)
 
     lbl_subject = ctk.CTkLabel(date_subject_frame, text='موضوع', font=font_spec)
-    lbl_subject.grid(row=0, column=1, sticky='e', padx=(0, 4))
+    lbl_subject.grid(row=0, column=1, sticky='e', padx=(pad, 4))
     entry_subject = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry)
     entry_subject.grid(row=0, column=0, sticky='ew', padx=(0, pad))
     entry_subject.insert(0, data.get('subject') or '')
@@ -994,31 +1173,39 @@ def open_edit_record(master, case_id):
     # Dedicated row for duration with RTL layout
     duration_frame = ctk.CTkFrame(top)
     duration_frame.grid(row=4, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
-    duration_frame.grid_columnconfigure(0, weight=0)
-    duration_frame.grid_columnconfigure(1, weight=1)  # تا Entry expands
-    duration_frame.grid_columnconfigure(2, weight=0)
-    duration_frame.grid_columnconfigure(3, weight=1)  # از Entry expands
-    duration_frame.grid_columnconfigure(4, weight=0)
+    duration_frame.grid_columnconfigure(0, weight=1) # calc label
+    duration_frame.grid_columnconfigure(1, weight=1) # to entry
+    duration_frame.grid_columnconfigure(2, weight=0) # to cal button
+    duration_frame.grid_columnconfigure(3, weight=0) # to label
+    duration_frame.grid_columnconfigure(4, weight=1) # from entry
+    duration_frame.grid_columnconfigure(5, weight=0) # from cal button
+    duration_frame.grid_columnconfigure(6, weight=0) # from label
 
     # RTL layout: from right to left
     lbl_duration_from = ctk.CTkLabel(duration_frame, text='از:', font=font_spec)
-    lbl_duration_from.grid(row=0, column=4, sticky='e', padx=(0, 4))
+    lbl_duration_from.grid(row=0, column=6, sticky='e', padx=(0, 4))
+
+    btn_cal_from = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_from), width=30)
+    btn_cal_from.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     entry_duration_from = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)    
-    entry_duration_from.grid(row=0, column=3, sticky='ew', padx=(0, pad))
+    entry_duration_from.grid(row=0, column=4, sticky='ew', padx=(0, pad))
     entry_duration_from.insert(0, data.get('duration_from') or jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_duration_from.bind('<KeyRelease>', normalize_date_input)
 
     lbl_duration_to = ctk.CTkLabel(duration_frame, text='تا:', font=font_spec)
-    lbl_duration_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
+    lbl_duration_to.grid(row=0, column=3, sticky='e', padx=(0, 4))
 
     entry_duration_to = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)
     entry_duration_to.grid(row=0, column=1, sticky='ew', padx=(0, pad))
     entry_duration_to.insert(0, data.get('duration_to') or jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_duration_to.bind('<KeyRelease>', normalize_date_input)
 
+    btn_cal_to = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_to), width=30)
+    btn_cal_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
+
     lbl_duration_calc = ctk.CTkLabel(duration_frame, text='', font=('vazirmatn', 12), text_color='#0066cc')
-    lbl_duration_calc.grid(row=0, column=0, sticky='w', padx=(4, 0))
+    lbl_duration_calc.grid(row=0, column=0, sticky='w', padx=(pad, 0))
 
     def compute_duration_label_edit():
         from_val = entry_duration_from.get().strip()
@@ -1092,16 +1279,16 @@ def open_edit_record(master, case_id):
         files = filedialog.askopenfilenames(title='انتخاب فایل‌ها')
         if files:
             selected_files['list'] = list(files)
-            lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد', text_color='black')
+            lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد')
 
     btn_attach = ctk.CTkButton(files_frame, text='📎 افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
     btn_attach.grid(row=0, column=1, sticky='e', padx=(pad, 0))
 
     # Export checkbox (default ON)
-    export_var = tk.BooleanVar(value=True)
+    export_var = tk.BooleanVar(value=False) # Default to OFF for edit mode
     chk_export = ctk.CTkCheckBox(
-        files_frame, 
-        text='ایجاد فایل CSV و TXT',
+        files_frame,
+        text='بروزرسانی فایل XLSX',
         variable=export_var,
         font=('vazirmatn', 11)
     )

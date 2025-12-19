@@ -60,7 +60,7 @@ def create_main_window():
     # Footer labels
     lbl_author = ctk.CTkLabel(app, text='نوشته شده توسط راستین علیزاده', font=('vazirmatn', 10), text_color='gray')
     lbl_author.pack(side='bottom', pady=(0, 5))
-    lbl_version = ctk.CTkLabel(app, text='v0.9.1', font=('vazirmatn', 9), text_color='gray')
+    lbl_version = ctk.CTkLabel(app, text='v2.1.1', font=('vazirmatn', 9), text_color='gray')
     lbl_version.pack(side='bottom')
 
     app.mainloop()

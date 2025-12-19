@@ -5,6 +5,11 @@ from tkinter import ttk, messagebox, filedialog
 import customtkinter as ctk
 import jdatetime
 import csv
+import openpyxl
+from openpyxl.styles import Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+import arabic_reshaper
+from bidi.algorithm import get_display
 from database import search_cases, delete_case, get_connection
 from ui.details_window import open_details_window
 
@@ -19,6 +24,12 @@ def convert_persian_to_english(text):
         text = text.replace(p, e)
     return text
 
+def convert_english_to_persian(text):
+    """Converts English numerals in a string to Persian numerals."""
+    english_to_persian_map = {v: k for k, v in PERSIAN_TO_ENGLISH_MAP.items()}
+    for e, p in english_to_persian_map.items():
+        text = text.replace(e, p)
+    return text
 
 def calculate_duration_text(duration_from, duration_to):
     """
@@ -38,28 +49,9 @@ def calculate_duration_text(duration_from, duration_to):
         diff_days = (g2 - g1).days
         
         if diff_days < 0:
-            return 'خطا: تاریخ پایان قبل از شروع'
+            return 'تاریخ پایان قبل از شروع'
         
-        # Calculate years, months, days
-        years = d2.year - d1.year
-        months = d2.month - d1.month
-        days = d2.day - d1.day
-        
-        if days < 0:
-            months -= 1
-            # Get days in previous month of d2
-            if d2.month == 1:
-                prev_month_days = 31
-            else:
-                prev_month_date = jdatetime.date(d2.year, d2.month - 1, 1)
-                prev_month_days = 31 if d2.month - 1 in [1, 3, 5, 7, 9, 11] else (30 if d2.month - 1 in [4, 6, 8, 10] else 29)
-            days += prev_month_days
-        
-        if months < 0:
-            years -= 1
-            months += 12
-        
-        return f'{years} سال، {months} ماه، {days} روز'
+        return f'{diff_days} روز'
     except Exception as e:
         return '-----'
 
@@ -85,11 +77,8 @@ def open_search_records(master):
     btn_delete = ctk.CTkButton(control_frame, text='🗑️ حذف پرونده', command=lambda: delete_selected_records(), font=('vazirmatn', 11, 'bold'), state="disabled")
     btn_delete.grid(row=0, column=0, padx=(0, pad))
 
-    btn_export_text = ctk.CTkButton(control_frame, text='📄 خروجی فایل TXT', font=('vazirmatn', 11, 'bold'), state="disabled")
-    btn_export_text.grid(row=0, column=1, padx=(0, pad))
-
-    btn_export_csv = ctk.CTkButton(control_frame, text='📊 خروجی فایل CSV', font=('vazirmatn', 11, 'bold'), state="disabled")
-    btn_export_csv.grid(row=0, column=2, padx=(0, pad), sticky='w')
+    btn_export_xlsx = ctk.CTkButton(control_frame, text='📄 خروجی فایل XLSX', font=('vazirmatn', 11, 'bold'), state="disabled")
+    btn_export_xlsx.grid(row=0, column=1, padx=(0, pad))
 
     # Search button
     btn_search = ctk.CTkButton(control_frame, text='🔍 جستجوی پرونده ها', command=lambda: do_search(), font=('vazirmatn', 11, 'bold'))
@@ -363,8 +352,7 @@ def open_search_records(master):
         lbl_status.configure(text=f'تعداد نتایج یافت شده: {len(rows)}', text_color='green' if rows else 'gray')
         
         # Enable export buttons if there are results
-        btn_export_text.configure(state="normal" if rows else "disabled")
-        btn_export_csv.configure(state="normal" if rows else "disabled")
+        btn_export_xlsx.configure(state="normal" if rows else "disabled")
         
         # Store results for export
         current_data['rows'] = rows
@@ -468,99 +456,47 @@ def open_search_records(master):
         # Update column headers to show sort direction
         update_sort_ui()
 
-    def export_to_text():
-        """Export current search results to Text file."""
+    def export_to_xlsx():
+        """Export current search results to an XLSX file."""
         if not current_data['rows']:
             messagebox.showwarning('هشدار', 'جدولی برای خروجی موجود نیست', parent=top)
             return
 
         file_path = filedialog.asksaveasfilename(
             parent=top,
-            defaultextension='.txt',
-            filetypes=[('Text Files', '*.txt'), ('All Files', '*.*')],
-            initialfile=f"نتایج_جستجو_{jdatetime.date.today().strftime('%Y%m%d')}.txt"
+            defaultextension='.xlsx',
+            filetypes=[('Excel Files', '*.xlsx'), ('All Files', '*.*')],
+            initialfile=f"نتایج_جستجو_{jdatetime.date.today().strftime('%Y%m%d')}.xlsx"
         )
 
         if not file_path:
             return
 
         try:
-            lines = []
-            lines.append('=' * 150)
-            lines.append('                              نتایج جستجو — سیستم مدیریت پرونده مهاجر'.center(150))
-            lines.append('=' * 150)
-            lines.append('')
-            lines.append(f'تعداد پرونده‌های یافت شده: {len(current_data["rows"])}')
-            lines.append(f'تاریخ تولید گزارش: {jdatetime.date.today().strftime("%Y-%m-%d")}')
-            lines.append('')
-            
-            headers = ['شناسه بایگانی', 'عنوان', 'موضوع', 'تاریخ', 'نوع پرونده', 'مدت', 'وضعیت', 'مبلغ قرارداد']
-            col_widths = [15, 20, 20, 12, 18, 15, 12, 18]
-            
-            separator = ''.join(['+' + '-' * (w) for w in col_widths]) + '+'
-            lines.append(separator)
-            
-            header_row = ''.join(['| ' + str(h).ljust(w - 2) for h, w in zip(headers, col_widths)]) + '|'
-            lines.append(header_row)
-            lines.append(separator)
-            
-            for row in current_data['rows']:
-                # Calculate duration from row[8] and row[9] if available
-                duration_text = calculate_duration_text(row[8] if len(row) > 8 else None, row[9] if len(row) > 9 else None)
-                # Format contract amount with ریال
-                contract_amount = str(row[7]) if row[7] else '-----'
-                if contract_amount != '-----' and (isinstance(row[7], (int, float)) or (isinstance(row[7], str) and row[7].replace(',', '').isdigit())):
-                    try:
-                        contract_amount = f"{int(row[7]):,} ریال"
-                    except (ValueError, TypeError):
-                        pass
-                row_data = [
-                    str(row[0]) if row[0] else '-----',
-                    str(row[1])[:18] if row[1] else '-----',
-                    str(row[2])[:18] if row[2] else '-----',
-                    str(row[3]) if row[3] else '-----',
-                    str(row[4])[:16] if row[4] else '-----',
-                    duration_text[:15] if duration_text else '-----',
-                    str(row[6]) if row[6] else '-----',
-                    contract_amount
-                ]
-                data_row = ''.join(['| ' + str(d).ljust(w - 2) for d, w in zip(row_data, col_widths)]) + '|'
-                lines.append(data_row)
-                lines.append(separator)
-            
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lines))
-            
-            messagebox.showinfo('موفق', f'گزارش با موفقیت صادر شد:\n{file_path}', parent=top)
-        except Exception as e:
-            messagebox.showerror('خطا', f'خطا در صادر کردن فایل: {str(e)}', parent=top)
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "نتایج جستجو"
+            sheet.sheet_view.rightToLeft = True
 
-    def export_to_csv():
-        """Export current search results to CSV file."""
-        if not current_data['rows']:
-            messagebox.showwarning('هشدار', 'جدولی برای خروجی موجود نیست', parent=top)
-            return
+            # --- Styles ---
+            bold_font = Font(name='Vazirmatn', bold=True)
+            regular_font = Font(name='Vazirmatn')
+            thin_border = Border(left=Side(style='thin'), 
+                                 right=Side(style='thin'), 
+                                 top=Side(style='thin'), 
+                                 bottom=Side(style='thin'))
+            center_alignment = Alignment(horizontal='center', vertical='center')
 
-        file_path = filedialog.asksaveasfilename(
-            parent=top,
-            defaultextension='.csv',
-            filetypes=[('CSV Files', '*.csv'), ('All Files', '*.*')],
-            initialfile=f"نتایج_جستجو_{jdatetime.date.today().strftime('%Y%m%d')}.csv"
-        )
-
-        if not file_path:
-            return
-
-        try:
+            # --- Fetch full data for XLSX export ---
             case_ids = [str(row[0]) for row in current_data['rows']]
-            
             conn = get_connection()
             cur = conn.cursor()
             cur.execute('SELECT * FROM cases WHERE id IN ({})'.format(','.join(['?' for _ in case_ids])), case_ids)
-            rows = cur.fetchall()
-            column_names = [description[0] for description in cur.description]
+            full_rows = cur.fetchall()
+            column_names = [desc[0] for desc in cur.description]
             conn.close()
-            
+
+            # --- Define Headers and Columns for XLSX ---
             column_labels = {
                 'id': 'شناسه بایگانی',
                 'title': 'عنوان',
@@ -587,55 +523,95 @@ def open_search_records(master):
                 'case_type': 'نوع پرونده',
                 'status': 'وضعیت',
             }
-            
             filtered_columns = [col for col in column_names if col not in ('folder_path', 'parties', 'duration')]
-            persian_headers = [column_labels.get(col, col) for col in filtered_columns]
-            # Add duration header at the position where 'duration' would be
             duration_index = column_names.index('duration') if 'duration' in column_names else -1
-            if duration_index >= 0:
+
+            # --- Headers ---
+            persian_headers = [column_labels.get(col, col) for col in filtered_columns]
+            if duration_index != -1:
                 persian_headers.insert(duration_index, 'مدت')
+            persian_headers.insert(0, 'ردیف') # Add Row column header
             
-            with open(file_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                writer.writerow(persian_headers)
+            reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in persian_headers]
+            sheet.append(reshaped_headers)
+
+            # Style Header
+            for col_num, header in enumerate(reshaped_headers, 1):
+                cell = sheet.cell(row=1, column=col_num)
+                cell.font = bold_font
+                cell.border = thin_border
+                cell.alignment = center_alignment
+
+            # --- Data Rows ---
+            for row_idx, row in enumerate(full_rows, start=2):
+                duration_from_idx = column_names.index('duration_from') if 'duration_from' in column_names else -1
+                duration_to_idx = column_names.index('duration_to') if 'duration_to' in column_names else -1
+                row_list = list(row)
+                calculated_duration = '-----'
+                if duration_from_idx != -1 and duration_to_idx != -1:
+                    calculated_duration = calculate_duration_text(row_list[duration_from_idx], row_list[duration_to_idx])
+
+                filtered_row = build_filtered_row(row_list, column_names, calculated_duration, add_rial=True)
                 
-                for row in rows:
-                    row_list = list(row)
-                    # Calculate duration if duration_from and duration_to exist
-                    duration_from_idx = column_names.index('duration_from') if 'duration_from' in column_names else -1
-                    duration_to_idx = column_names.index('duration_to') if 'duration_to' in column_names else -1
-                    
-                    calculated_duration = '-----'
-                    if duration_from_idx >= 0 and duration_to_idx >= 0:
-                        calculated_duration = calculate_duration_text(row_list[duration_from_idx], row_list[duration_to_idx])
-                    
-                    # Build filtered row, replacing duration with calculated value
-                    filtered_row = []
-                    for i, col in enumerate(column_names):
-                        if col not in ('folder_path', 'parties'):
-                            if col == 'duration':
-                                filtered_row.append(calculated_duration)
-                            elif col == 'contract_amount':
-                                # Add ریال to contract amount
-                                value = row_list[i]
-                                if value and (isinstance(value, (int, float)) or (isinstance(value, str) and value.replace(',', '').isdigit())):
-                                    try:
-                                        filtered_row.append(f"{int(value):,} ریال")
-                                    except (ValueError, TypeError):
-                                        filtered_row.append(value)
-                                else:
-                                    filtered_row.append(value)
-                            else:
-                                filtered_row.append(row_list[i])
-                    writer.writerow(filtered_row)
+                # Add row number
+                filtered_row.insert(0, row_idx - 1)
+
+                # Reshape for display
+                reshaped_row = [get_display(arabic_reshaper.reshape(str(item) if item is not None else '')) for item in filtered_row]
+                sheet.append(reshaped_row)
+
+                # Apply font, border, and alignment to data cells
+                for col_idx, _ in enumerate(reshaped_row, 1):
+                    cell = sheet.cell(row=row_idx, column=col_idx)
+                    cell.font = regular_font
+                    cell.border = thin_border
+                    cell.alignment = center_alignment
+
+            # --- Adjust Column Widths ---
+            for col in sheet.columns:
+                max_length = 0
+                column = col[0].column_letter # Get the column letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = (max_length + 2) * 1.2
+                sheet.column_dimensions[column].width = adjusted_width
+
+            workbook.save(file_path)
             
             messagebox.showinfo('موفق', f'گزارش با موفقیت صادر شد:\n{file_path}', parent=top)
         except Exception as e:
-            messagebox.showerror('خطا', f'خطا در صادر کردن فایل: {str(e)}', parent=top)
+            messagebox.showerror('خطا', f'خطا در صادر کردن فایل XLSX: {str(e)}', parent=top)
+
+    def build_filtered_row(row_list, column_names, calculated_duration, add_rial=False):
+        """Helper function to build a row for CSV/XLSX export."""
+        filtered_row = []
+        for i, col in enumerate(column_names):
+            if col not in ('folder_path', 'parties'):
+                if col == 'duration':
+                    filtered_row.append(calculated_duration)
+                elif col == 'contract_amount' and add_rial:
+                    value = row_list[i]
+                    if value and (isinstance(value, (int, float)) or (isinstance(value, str) and str(value).replace(',', '').isdigit())):
+                        try:
+                            filtered_row.append(f"{int(value):,} ریال")
+                        except (ValueError, TypeError):
+                            filtered_row.append(value)
+                    else:
+                        filtered_row.append(value)
+                else:
+                    filtered_row.append(row_list[i])
+        return filtered_row
+
+    # Define these here to be accessible by export functions
+    duration_from_idx = -1
+    duration_to_idx = -1
 
     # Set button commands
-    btn_export_text.configure(command=export_to_text)
-    btn_export_csv.configure(command=export_to_csv)
+    btn_export_xlsx.configure(command=export_to_xlsx)
 
     tree.bind('<Double-1>', on_open_details)
     tree.bind('<<TreeviewSelect>>', on_selection_change)

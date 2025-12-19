@@ -3,6 +3,13 @@ from tkinter import ttk, messagebox, filedialog
 import customtkinter as ctk
 import jdatetime
 import os
+import csv
+import openpyxl
+from openpyxl.styles import Font, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
+import arabic_reshaper
+from bidi.algorithm import get_display
+
 import tempfile
 from database import get_connection
 
@@ -27,11 +34,8 @@ def open_reports_window(master):
     header_frame.grid_columnconfigure(3, weight=1)  # Flexible space in middle
     
     # Buttons (left side - columns 0-2)
-    btn_export_csv = ctk.CTkButton(header_frame, text='📊 خروجی CSV', font=font_bold, state=tk.DISABLED)
-    btn_export_csv.grid(row=0, column=0, padx=(0, 4))
-
-    btn_export_text = ctk.CTkButton(header_frame, text='📄 خروجی Text', font=font_bold, state=tk.DISABLED)
-    btn_export_text.grid(row=0, column=1, padx=(0, 4))
+    btn_export_xlsx = ctk.CTkButton(header_frame, text='📄 خروجی XLSX', font=font_bold, state=tk.DISABLED, command=lambda: export_to_xlsx(current_data['rows']))
+    btn_export_xlsx.grid(row=0, column=1, padx=(0, 4))
 
     btn_filter = ctk.CTkButton(header_frame, text='🔍 فیلتر', font=font_bold)
     btn_filter.grid(row=0, column=2, padx=(0, pad))
@@ -232,178 +236,76 @@ def open_reports_window(master):
         lbl_status.configure(text=f'تعداد پرونده‌های یافت شده: {len(rows)}', text_color='green')
         
         # Enable export buttons if there are results
-        btn_export_text.configure(state='normal' if rows else 'disabled')
-        btn_export_csv.configure(state='normal' if rows else 'disabled')
+        btn_export_xlsx.configure(state='normal' if rows else 'disabled')
 
     btn_filter.configure(command=do_filter)
 
-    def export_to_text():
-        """Export current table to Text file with ASCII table formatting."""
-        if not current_data['rows']:
+    def export_to_xlsx(rows_to_export):
+        """Export current table to an XLSX file."""
+        if not rows_to_export:
             messagebox.showwarning('هشدار', 'جدولی برای خروجی موجود نیست', parent=top)
             return
 
-        # Ask user for file location
         file_path = filedialog.asksaveasfilename(
             parent=top,
-            defaultextension='.txt',
-            filetypes=[('Text Files', '*.txt'), ('All Files', '*.*')],
-            initialfile=f"گزارش_پرونده‌ها_{jdatetime.date.today().strftime('%Y%m%d')}.txt"
+            defaultextension='.xlsx',
+            filetypes=[('Excel Files', '*.xlsx'), ('All Files', '*.*')],
+            initialfile=f"گزارش_پرونده‌ها_{jdatetime.date.today().strftime('%Y%m%d')}.xlsx"
         )
 
         if not file_path:
             return
 
         try:
-            date_from = entry_from.get().strip()
-            date_to = entry_to.get().strip()
-            
-            # Prepare content
-            lines = []
-            lines.append('=' * 150)
-            lines.append('                              گزارش گیری پرونده‌های سیستم مدیریت پرونده مهاجر'.center(150))
-            lines.append('=' * 150)
-            lines.append('')
-            lines.append(f'بازه زمانی: از {date_from} تا {date_to}')
-            lines.append(f'تعداد پرونده‌های یافت شده: {len(current_data["rows"])}')
-            lines.append(f'تاریخ تولید گزارش: {jdatetime.date.today().strftime("%Y-%m-%d")}')
-            lines.append('')
-            
-            # Table headers
+            workbook = openpyxl.Workbook()
+            sheet = workbook.active
+            sheet.title = "گزارش پرونده ها"
+            sheet.sheet_view.rightToLeft = True
+
+            # --- Styles ---
+            bold_font = Font(name='Vazirmatn', bold=True)
+            regular_font = Font(name='Vazirmatn')
+            thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+            center_alignment = Alignment(horizontal='center', vertical='center')
+
             headers = ['شناسه بایگانی', 'عنوان', 'موضوع', 'تاریخ', 'نوع پرونده', 'مدت', 'مبلغ قرارداد']
-            col_widths = [15, 20, 20, 12, 18, 15, 18]
-            
-            # Create separator line
-            separator = ''.join(['+' + '-' * (w) for w in col_widths]) + '+'
-            
-            # Add header row
-            lines.append(separator)
-            header_row = ''.join(['| ' + str(h).ljust(w - 2) for h, w in zip(headers, col_widths)]) + '|'
-            lines.append(header_row)
-            lines.append(separator)
-            
-            # Add data rows
-            for row in current_data['rows']:
-                row_data = [
-                    str(row[0]) if row[0] else '-----',
-                    str(row[1])[:18] if row[1] else '-----',  # Truncate long titles
-                    str(row[2])[:18] if row[2] else '-----',  # Truncate long subjects
-                    str(row[3]) if row[3] else '-----',
-                    str(row[4])[:16] if row[4] else '-----',  # Truncate case type
-                    str(row[5]) if row[5] else '-----',
-                    str(row[6]) if row[6] else '-----'
-                ]
-                data_row = ''.join(['| ' + str(d).ljust(w - 2) for d, w in zip(row_data, col_widths)]) + '|'
-                lines.append(data_row)
-                lines.append(separator)
-            
-            lines.append('')
-            lines.append('=' * 150)
-            lines.append('')
-            
-            # Write to file with UTF-8 encoding
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write('\n'.join(lines))
-            
+            headers.insert(0, 'ردیف') # Add Row column header
+            reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in headers]
+            sheet.append(reshaped_headers)
+
+            # Apply style to header
+            for col_num, header in enumerate(reshaped_headers, 1):
+                cell = sheet.cell(row=1, column=col_num)
+                cell.font = bold_font
+                cell.border = thin_border
+                cell.alignment = center_alignment
+
+            # Apply style to data rows
+            for row_idx, row in enumerate(rows_to_export, start=2):
+                # Add row number to the start of the row data
+                row_with_num = [row_idx - 1] + list(row)
+                reshaped_row = [get_display(arabic_reshaper.reshape(str(item) if item is not None else '')) for item in row_with_num]
+                sheet.append(reshaped_row)
+                for col_idx, _ in enumerate(reshaped_row, 1):
+                    cell = sheet.cell(row=row_idx, column=col_idx)
+                    cell.font = regular_font
+                    cell.border = thin_border
+                    cell.alignment = center_alignment
+
+            # Adjust column widths
+            for col in sheet.columns:
+                max_length = 0
+                column = col[0].column_letter # Get the column letter
+                for cell in col:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = (max_length + 2) * 1.2
+                sheet.column_dimensions[column].width = adjusted_width
+
+            workbook.save(file_path)
             messagebox.showinfo('موفق', f'گزارش با موفقیت صادر شد:\n{file_path}', parent=top)
-
         except Exception as e:
-            import traceback
-            error_detail = traceback.format_exc()
-            print(f"Text Export Error:\n{error_detail}")
-            messagebox.showerror('خطا', f'خطا در صادر کردن فایل متن:\n{str(e)}', parent=top)
-
-    def export_to_csv():
-        """Export all case data to CSV file with all database columns (excluding folder_path)."""
-        if not current_data['rows']:
-            messagebox.showwarning('هشدار', 'جدولی برای خروجی موجود نیست', parent=top)
-            return
-
-        # Ask user for file location
-        file_path = filedialog.asksaveasfilename(
-            parent=top,
-            defaultextension='.csv',
-            filetypes=[('CSV Files', '*.csv'), ('All Files', '*.*')],
-            initialfile=f"گزارش_پرونده‌ها_{jdatetime.date.today().strftime('%Y%m%d')}.csv"
-        )
-
-        if not file_path:
-            return
-
-        try:
-            import csv
-            
-            # Get all case IDs from filtered results
-            case_ids = [str(row[0]) for row in current_data['rows']]
-            
-            if not case_ids:
-                messagebox.showwarning('هشدار', 'هیچ پرونده‌ای برای صادر کردن نیست', parent=top)
-                return
-            
-            # Get full data for all cases
-            conn = get_connection()
-            cur = conn.cursor()
-            
-            # Query to get ALL columns from the cases table
-            cur.execute('SELECT * FROM cases WHERE id IN ({})'.format(','.join(['?' for _ in case_ids])), case_ids)
-            rows = cur.fetchall()
-            
-            # Get column names from cursor description
-            column_names = [description[0] for description in cur.description]
-            
-            conn.close()
-            
-            # Map English column names to Persian labels (excluding folder_path)
-            column_labels = {
-                'id': 'شناسه بایگانی',
-                'title': 'عنوان',
-                'date': 'تاریخ',
-                'duration': 'مدت',
-                'duration_from': 'تاریخ شروع',
-                'duration_to': 'تاریخ پایان',
-                'mojer': 'موجر',
-                'mostajjer': 'مستاجر',
-                'karfarma': 'کارفرما',
-                'piman': 'پیمانکار',
-                'subject': 'موضوع',
-                'contract_amount': 'مبلغ قرارداد',
-                'bank_owner_name': 'نام صاحب حساب',
-                'bank_account_number': 'شماره حساب',
-                'bank_shaba_number': 'شماره شبا',
-                'bank_card_number': 'شماره کارت',
-                'description': 'توضیحات',
-                'case_type': 'نوع پرونده',
-                'status': 'وضعیت',
-                'parties': 'طرفین'
-            }
-            
-            # Filter out folder_path and parties, create Persian headers
-            filtered_columns = [col for col in column_names if col not in ('folder_path', 'parties')]
-            persian_headers = [column_labels.get(col, col) for col in filtered_columns]
-            
-            # Write to CSV file
-            with open(file_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                writer = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                
-                # Write header row with Persian labels
-                writer.writerow(persian_headers)
-                
-                # Write data rows (filtering out folder_path and parties values)
-                for row in rows:
-                    # Convert tuple to list and filter out folder_path and parties values
-                    row_list = list(row)
-                    # Filter based on which columns to exclude
-                    filtered_row = [row_list[i] for i, col in enumerate(column_names) if col not in ('folder_path', 'parties')]
-                    writer.writerow(filtered_row)
-            
-            messagebox.showinfo('موفق', f'گزارش با موفقیت صادر شد:\n{file_path}', parent=top)
-
-        except Exception as e:
-            import traceback
-            error_detail = traceback.format_exc()
-            print(f"CSV Export Error:\n{error_detail}")
-            messagebox.showerror('خطا', f'خطا در صادر کردن فایل CSV:\n{str(e)}', parent=top)
-
-    btn_filter.configure(command=do_filter)
-    btn_export_text.configure(command=export_to_text)
-    btn_export_csv.configure(command=export_to_csv)
+            messagebox.showerror('خطا', f'خطا در صادر کردن فایل XLSX: {str(e)}', parent=top)
