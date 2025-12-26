@@ -17,9 +17,6 @@ try:
     import openpyxl
     from openpyxl.styles import Font, Border, Side, Alignment
     from openpyxl.utils import get_column_letter
-    # Bidi support for XLSX
-    import arabic_reshaper
-    from bidi.algorithm import get_display
 except ImportError as e:
     print(f"Import Error: {e}. Please install required library (Pillow).")
 
@@ -32,6 +29,13 @@ def convert_persian_to_english(text):
     """Converts Persian/Arabic numerals in a string to English numerals."""
     for p, e in PERSIAN_TO_ENGLISH_MAP.items():
         text = text.replace(p, e)
+    return text
+
+def convert_english_to_persian(text):
+    """Converts English numerals in a string to Persian numerals."""
+    english_to_persian_map = {v: k for k, v in PERSIAN_TO_ENGLISH_MAP.items()}
+    for e, p in english_to_persian_map.items():
+        text = text.replace(e, p)
     return text
 
 class CustomJalaliCalendar(ctk.CTkFrame):
@@ -165,9 +169,16 @@ def open_add_record(master):
 
     master: parent window (ctk.CTk or ctk.CTkToplevel)
     """
+    master.withdraw()
     top = ctk.CTkToplevel(master)
-    top.title('💾 ایجاد پرونده جدید — سیستم مدیریت پرونده مهاجر')
+    top.title('ایجاد پرونده جدید — سیستم مدیریت پرونده مهاجر')
     top.geometry('720x550')
+
+    def on_close():
+        master.deiconify()
+        top.destroy()
+    
+    top.protocol("WM_DELETE_WINDOW", on_close)
     
     # Configure grid layout: 3 columns (spacer, main content, labels)
     top.grid_columnconfigure(0, weight=0)
@@ -179,15 +190,14 @@ def open_add_record(master):
     font_spec = ('vazirmatn', 13, 'bold')
     font_entry = ('vazirmatn', 13)  # Regular font for entry fields
 
-    # --- Row 0: Title (with logo) and Case Type ---
-    # Create a frame to hold case type, title+logo side-by-side
+    # --- Row 0: Title and Case Type ---
+    # Create a frame to hold case type and title side-by-side
     title_case_frame = ctk.CTkFrame(top)
     title_case_frame.grid(row=0, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
     title_case_frame.grid_columnconfigure(0, weight=1)  # Case type combobox expands
     title_case_frame.grid_columnconfigure(1, weight=0)  # Case type label
     title_case_frame.grid_columnconfigure(2, weight=1)  # Title entry expands
     title_case_frame.grid_columnconfigure(3, weight=0)  # Title label
-    title_case_frame.grid_columnconfigure(4, weight=0)  # Logo (rightmost)
     
     # Case type label and combobox (balanced width)
     lbl_case_type = ctk.CTkLabel(title_case_frame, text='نوع پرونده', font=font_spec)
@@ -205,17 +215,6 @@ def open_add_record(master):
     entry_title = ctk.CTkEntry(title_case_frame, justify='right', font=font_entry)
     entry_title.grid(row=0, column=2, sticky='ew', padx=(0, pad))
     
-    # Load and resize logo (rightmost)
-    logo_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'logo1.png')
-    try:
-        my_image = ctk.CTkImage(light_image=Image.open(logo_path),
-                                dark_image=Image.open(logo_path),
-                                size=(50, 50))
-        lbl_logo = ctk.CTkLabel(title_case_frame, image=my_image, text="")
-        lbl_logo.grid(row=0, column=4, sticky='e', padx=(pad, 0))
-    except Exception as e:
-        print(f"Warning: Could not load logo: {e}")
-
     def on_case_type_change(choice):
         if choice == 'سایر':
             combo_case_type.grid_remove()
@@ -251,10 +250,10 @@ def open_add_record(master):
             widget.insert(0, new_text)
 
     # Today button (between label and entry)
-    btn_today = ctk.CTkButton(date_subject_frame, text='📅 امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=80)
+    btn_today = ctk.CTkButton(date_subject_frame, text='امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=80)
     btn_today.grid(row=0, column=4, sticky='e', padx=(0, 4))
 
-    btn_cal_date = ctk.CTkButton(date_subject_frame, text='🗓️', command=lambda: open_calendar(top, entry_date), width=30)
+    btn_cal_date = ctk.CTkButton(date_subject_frame, text='تقویم', command=lambda: open_calendar(top, entry_date), width=50, font=('vazirmatn', 11, 'bold'))
     btn_cal_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
 
     entry_date = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry, width=150)
@@ -378,7 +377,7 @@ def open_add_record(master):
             bank_data['card_number'] = entry_card.get().strip()
             bank_win.destroy()
 
-        btn_save_bank = ctk.CTkButton(bank_win, text='💾 ذخیره', command=save_bank_data, font=('vazirmatn', 12, 'bold'))
+        btn_save_bank = ctk.CTkButton(bank_win, text='ذخیره', command=save_bank_data, font=('vazirmatn', 12, 'bold'))
         btn_save_bank.grid(row=7, column=0, columnspan=2, pady=(pad, pad), padx=pad, sticky='ew')
 
     def open_guarantee_window():
@@ -463,10 +462,10 @@ def open_add_record(master):
     buttons_frame.grid_columnconfigure(0, weight=1)
     buttons_frame.grid_columnconfigure(1, weight=1)
 
-    btn_guarantee = ctk.CTkButton(buttons_frame, text='🛡️ تضمین قرارداد', command=open_guarantee_window, font=font_spec)
+    btn_guarantee = ctk.CTkButton(buttons_frame, text='تضمین قرارداد', command=open_guarantee_window, font=font_spec)
     btn_guarantee.grid(row=0, column=0, sticky='ew', padx=(0, 2))
 
-    btn_bank = ctk.CTkButton(buttons_frame, text='🏦 افزودن حساب', command=open_bank_account_window, font=font_spec)
+    btn_bank = ctk.CTkButton(buttons_frame, text='افزودن حساب', command=open_bank_account_window, font=font_spec)
     btn_bank.grid(row=0, column=1, sticky='ew', padx=(2, 0))
 
     lbl_rial = ctk.CTkLabel(amount_frame, text='ریال', font=('vazirmatn', 12, 'bold'))
@@ -506,7 +505,7 @@ def open_add_record(master):
     lbl_duration_from = ctk.CTkLabel(duration_frame, text='از:', font=font_spec)
     lbl_duration_from.grid(row=0, column=6, sticky='e', padx=(0, 4))
 
-    btn_cal_from = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_from), width=30)
+    btn_cal_from = ctk.CTkButton(duration_frame, text='تقویم', command=lambda: open_calendar(top, entry_duration_from), width=60, font=('vazirmatn', 11, 'bold'))
     btn_cal_from.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     entry_duration_from = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)    
@@ -525,7 +524,7 @@ def open_add_record(master):
     lbl_duration_calc = ctk.CTkLabel(duration_frame, text='', font=('vazirmatn', 12), text_color='#0066cc')
     lbl_duration_calc.grid(row=0, column=0, sticky='w', padx=(pad, 0))
 
-    btn_cal_to = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_to), width=30)
+    btn_cal_to = ctk.CTkButton(duration_frame, text='تقویم', command=lambda: open_calendar(top, entry_duration_to), width=60, font=('vazirmatn', 11, 'bold'))
     btn_cal_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
 
     def compute_duration_label():
@@ -606,7 +605,7 @@ def open_add_record(master):
             selected_files['list'] = list(files)
             lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد')
 
-    btn_attach = ctk.CTkButton(files_frame, text='📎 افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
+    btn_attach = ctk.CTkButton(files_frame, text='افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
     btn_attach.grid(row=0, column=1, sticky='e', padx=(pad, 0))
 
     # Export checkbox (default ON)
@@ -628,14 +627,14 @@ def open_add_record(master):
     lbl_status = ctk.CTkLabel(frame_status, text='وضعیت:', font=('vazirmatn', 11, 'bold'))
     lbl_status.pack(side='right', padx=(0, 8))
     
-    rb_active = ctk.CTkRadioButton(frame_status, text='✓ در جریان', variable=status_var, value='در جریان', font=('vazirmatn', 11), text_color='green')
+    rb_active = ctk.CTkRadioButton(frame_status, text='در جریان', variable=status_var, value='در جریان', font=('vazirmatn', 11), text_color='green')
     rb_active.pack(side='right', padx=2)
     
-    rb_inactive = ctk.CTkRadioButton(frame_status, text='✗ راکد', variable=status_var, value='راکد', font=('vazirmatn', 11), text_color='red')
+    rb_inactive = ctk.CTkRadioButton(frame_status, text='راکد', variable=status_var, value='راکد', font=('vazirmatn', 11), text_color='red')
     rb_inactive.pack(side='right', padx=2)
 
     # --- Row 7: Save Button ---
-    btn_save = ctk.CTkButton(top, text='💾 ذخیره پرونده', command=lambda: save_case(top, selected_files, entry_title, entry_date, entry_duration_from, entry_duration_to, entry_mojer, entry_mostajjer, entry_karfarma, entry_piman, entry_subject, text_desc, entry_contract_amount, combo_case_type, entry_case_type_other, bank_data, status_var, export_var, guarantee_data), font=('vazirmatn', 14, 'bold'), height=40)
+    btn_save = ctk.CTkButton(top, text='ذخیره پرونده', command=lambda: save_case(top, selected_files, entry_title, entry_date, entry_duration_from, entry_duration_to, entry_mojer, entry_mostajjer, entry_karfarma, entry_piman, entry_subject, text_desc, entry_contract_amount, combo_case_type, entry_case_type_other, bank_data, status_var, export_var, guarantee_data), font=('vazirmatn', 14, 'bold'), height=40)
     btn_save.grid(row=7, column=0, columnspan=3, sticky='ew', padx=pad, pady=(pad, pad))
 
 
@@ -669,7 +668,7 @@ def save_case(top, selected_files, entry_title, entry_date, entry_duration_from,
             d2 = jdatetime.datetime.strptime(to_val, '%Y-%m-%d').date()
             diff_days = (d2.togregorian() - d1.togregorian()).days
             if diff_days >= 0:
-                duration_str = f'{diff_days} روز'
+                duration_str = f'{convert_english_to_persian(str(diff_days))} \u200eروز'
             else:
                 duration_str = ''
     except Exception:
@@ -715,6 +714,7 @@ def save_case(top, selected_files, entry_title, entry_date, entry_duration_from,
     try:
         add_case(data)
         messagebox.showinfo('موفق', f'پرونده با شماره {case_id} ایجاد شد', parent=top)
+        top.master.deiconify()
         top.destroy()
     except Exception as e:
         messagebox.showerror('خطا', f'خطا در ذخیره: {e}', parent=top)
@@ -772,7 +772,8 @@ def export_case_to_files(data):
                              right=Side(style='thin'), 
                              top=Side(style='thin'), 
                              bottom=Side(style='thin'))
-        center_alignment = Alignment(horizontal='center', vertical='center')
+        # readingOrder=2 forces RTL direction in the cell, which fixes display on Windows
+        center_alignment = Alignment(horizontal='center', vertical='center', readingOrder=2)
 
         # --- Data Preparation ---
         headers = [item[0] for item in case_info]
@@ -782,12 +783,9 @@ def export_case_to_files(data):
         headers.insert(0, 'ردیف')
         values.insert(0, 1)
 
-        reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in headers]
-        reshaped_values = [get_display(arabic_reshaper.reshape(str(v) if v is not None else '')) for v in values]
-
         # --- Write to Sheet ---
-        sheet.append(reshaped_headers)
-        sheet.append(reshaped_values)
+        sheet.append(headers)
+        sheet.append([str(v) if v is not None else '' for v in values])
 
         # --- Apply Styles and Adjust Widths ---
         for col_idx, col in enumerate(sheet.columns, 1):
@@ -818,9 +816,16 @@ def open_edit_record(master, case_id):
         messagebox.showerror('خطا', 'پرونده یافت نشد')
         return
 
+    master.withdraw()
     top = ctk.CTkToplevel(master)
-    top.title(f'✏️ ویرایش پرونده {case_id} — سیستم مدیریت پرونده مهاجر')
+    top.title(f'ویرایش پرونده {case_id} — سیستم مدیریت پرونده مهاجر')
     top.geometry('720x550')
+
+    def on_close():
+        master.deiconify()
+        top.destroy()
+    
+    top.protocol("WM_DELETE_WINDOW", on_close)
 
     # Configure grid
     top.grid_columnconfigure(0, weight=0)
@@ -832,14 +837,13 @@ def open_edit_record(master, case_id):
     font_spec = ('vazirmatn', 13, 'bold')
     font_entry = ('vazirmatn', 13)  # Regular font for entry fields
 
-    # Row 0: Title (with logo) and Case Type
+    # Row 0: Title and Case Type
     title_case_frame = ctk.CTkFrame(top)
     title_case_frame.grid(row=0, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
     title_case_frame.grid_columnconfigure(0, weight=1)  # Case type combobox expands
     title_case_frame.grid_columnconfigure(1, weight=0)  # Case type label
     title_case_frame.grid_columnconfigure(2, weight=1)  # Title entry expands
     title_case_frame.grid_columnconfigure(3, weight=0)  # Title label
-    title_case_frame.grid_columnconfigure(4, weight=0)  # Logo (rightmost)
     
     # Case type label and combobox (balanced width)
     lbl_case_type = ctk.CTkLabel(title_case_frame, text='نوع پرونده', font=font_spec)
@@ -857,17 +861,6 @@ def open_edit_record(master, case_id):
     entry_title.grid(row=0, column=2, sticky='ew', padx=(0, pad))
     entry_title.insert(0, data.get('title') or '')
     
-    # Load and resize logo (rightmost)
-    logo_path = os.path.join(os.path.dirname(__file__), '..', 'assets', 'icons', 'logo1.png')
-    try:
-        my_image = ctk.CTkImage(light_image=Image.open(logo_path),
-                                dark_image=Image.open(logo_path),
-                                size=(50, 50))
-        lbl_logo = ctk.CTkLabel(title_case_frame, image=my_image, text="")
-        lbl_logo.grid(row=0, column=4, sticky='e', padx=(pad, 0))
-    except Exception as e:
-        print(f"Warning: Could not load logo: {e}")
-
     # Row 1: Date & Subject
     date_subject_frame = ctk.CTkFrame(top)
     date_subject_frame.grid(row=1, column=1, columnspan=2, sticky='ew', padx=pad, pady=pad)
@@ -893,10 +886,10 @@ def open_edit_record(master, case_id):
     lbl_date.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     # Today button (between label and entry)
-    btn_today = ctk.CTkButton(date_subject_frame, text='📅 امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=80)
+    btn_today = ctk.CTkButton(date_subject_frame, text='امروز', command=lambda: (entry_date.delete(0, tk.END), entry_date.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=60)
     btn_today.grid(row=0, column=4, sticky='e', padx=(0, 4))
 
-    btn_cal_date = ctk.CTkButton(date_subject_frame, text='🗓️', command=lambda: open_calendar(top, entry_date), width=30)
+    btn_cal_date = ctk.CTkButton(date_subject_frame, text='تقویم', command=lambda: open_calendar(top, entry_date), width=60, font=('vazirmatn', 11, 'bold'))
     btn_cal_date.grid(row=0, column=3, sticky='e', padx=(0, 4))
 
     entry_date = ctk.CTkEntry(date_subject_frame, justify='right', font=font_entry, width=150)
@@ -1052,7 +1045,7 @@ def open_edit_record(master, case_id):
             bank_data['card_number'] = entry_card.get().strip()
             bank_win.destroy()
 
-        btn_save_bank = ctk.CTkButton(bank_win, text='💾 ذخیره', command=save_bank_data, font=('vazirmatn', 12, 'bold'))
+        btn_save_bank = ctk.CTkButton(bank_win, text='ذخیره', command=save_bank_data, font=('vazirmatn', 12, 'bold'))
         btn_save_bank.grid(row=7, column=0, columnspan=2, pady=(pad, pad), padx=pad, sticky='ew')
 
     def open_guarantee_window():
@@ -1141,10 +1134,10 @@ def open_edit_record(master, case_id):
     buttons_frame.grid_columnconfigure(0, weight=1)
     buttons_frame.grid_columnconfigure(1, weight=1)
 
-    btn_guarantee = ctk.CTkButton(buttons_frame, text='🛡️ تضمین قرارداد', command=open_guarantee_window, font=font_spec)
+    btn_guarantee = ctk.CTkButton(buttons_frame, text='تضمین قرارداد', command=open_guarantee_window, font=font_spec)
     btn_guarantee.grid(row=0, column=0, sticky='ew', padx=(0, 2))
 
-    btn_bank = ctk.CTkButton(buttons_frame, text='🏦 ویرایش حساب', command=open_bank_account_window, font=font_spec)
+    btn_bank = ctk.CTkButton(buttons_frame, text='ویرایش حساب', command=open_bank_account_window, font=font_spec)
     btn_bank.grid(row=0, column=1, sticky='ew', padx=(2, 0))
 
     entry_contract_amount = ctk.CTkEntry(amount_frame, justify='right', font=font_entry)
@@ -1185,7 +1178,7 @@ def open_edit_record(master, case_id):
     lbl_duration_from = ctk.CTkLabel(duration_frame, text='از:', font=font_spec)
     lbl_duration_from.grid(row=0, column=6, sticky='e', padx=(0, 4))
 
-    btn_cal_from = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_from), width=30)
+    btn_cal_from = ctk.CTkButton(duration_frame, text='تقویم', command=lambda: open_calendar(top, entry_duration_from), width=60, font=('vazirmatn', 11, 'bold'))
     btn_cal_from.grid(row=0, column=5, sticky='e', padx=(0, 4))
 
     entry_duration_from = ctk.CTkEntry(duration_frame, justify='right', font=font_entry, width=150)    
@@ -1201,7 +1194,7 @@ def open_edit_record(master, case_id):
     entry_duration_to.insert(0, data.get('duration_to') or jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_duration_to.bind('<KeyRelease>', normalize_date_input)
 
-    btn_cal_to = ctk.CTkButton(duration_frame, text='🗓️', command=lambda: open_calendar(top, entry_duration_to), width=30)
+    btn_cal_to = ctk.CTkButton(duration_frame, text='تقویم', command=lambda: open_calendar(top, entry_duration_to), width=60, font=('vazirmatn', 11, 'bold'))
     btn_cal_to.grid(row=0, column=2, sticky='e', padx=(0, 4))
 
     lbl_duration_calc = ctk.CTkLabel(duration_frame, text='', font=('vazirmatn', 12), text_color='#0066cc')
@@ -1281,11 +1274,11 @@ def open_edit_record(master, case_id):
             selected_files['list'] = list(files)
             lbl_files.configure(text=f'{len(selected_files["list"])} فایل انتخاب شد')
 
-    btn_attach = ctk.CTkButton(files_frame, text='📎 افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
+    btn_attach = ctk.CTkButton(files_frame, text='افزودن فایل پیوست', command=select_files, font=('vazirmatn', 13, 'bold'))
     btn_attach.grid(row=0, column=1, sticky='e', padx=(pad, 0))
 
     # Export checkbox (default ON)
-    export_var = tk.BooleanVar(value=False) # Default to OFF for edit mode
+    export_var = tk.BooleanVar(value=True) # Default to ON for edit mode
     chk_export = ctk.CTkCheckBox(
         files_frame,
         text='بروزرسانی فایل XLSX',
@@ -1303,14 +1296,14 @@ def open_edit_record(master, case_id):
     lbl_status = ctk.CTkLabel(frame_status, text='وضعیت:', font=('vazirmatn', 11, 'bold'))
     lbl_status.pack(side='right', padx=(0, 8))
     
-    rb_active = ctk.CTkRadioButton(frame_status, text='✓ در جریان', variable=status_var, value='در جریان', font=('vazirmatn', 11), text_color='green')
+    rb_active = ctk.CTkRadioButton(frame_status, text='در جریان', variable=status_var, value='در جریان', font=('vazirmatn', 11), text_color='green')
     rb_active.pack(side='right', padx=2)
     
-    rb_inactive = ctk.CTkRadioButton(frame_status, text='✗ راکد', variable=status_var, value='راکد', font=('vazirmatn', 11), text_color='red')
+    rb_inactive = ctk.CTkRadioButton(frame_status, text='راکد', variable=status_var, value='راکد', font=('vazirmatn', 11), text_color='red')
     rb_inactive.pack(side='right', padx=2)
 
     # Save button for edit
-    btn_save = ctk.CTkButton(top, text='💾 ذخیره تغییرات', command=lambda: save_edit_case(top, case_id, selected_files, entry_title, entry_date, entry_duration_from, entry_duration_to, entry_mojer, entry_mostajjer, entry_karfarma, entry_piman, entry_subject, text_desc, entry_contract_amount, combo_case_type, entry_case_type_other, bank_data, status_var, export_var, guarantee_data), font=('vazirmatn', 14, 'bold'), height=40)
+    btn_save = ctk.CTkButton(top, text='ذخیره تغییرات', command=lambda: save_edit_case(top, case_id, selected_files, entry_title, entry_date, entry_duration_from, entry_duration_to, entry_mojer, entry_mostajjer, entry_karfarma, entry_piman, entry_subject, text_desc, entry_contract_amount, combo_case_type, entry_case_type_other, bank_data, status_var, export_var, guarantee_data), font=('vazirmatn', 14, 'bold'), height=40)
     btn_save.grid(row=7, column=0, columnspan=3, sticky='ew', padx=pad, pady=(pad, pad))
 
 
@@ -1349,7 +1342,7 @@ def save_edit_case(top, case_id, selected_files, entry_title, entry_date, entry_
             d2 = jdatetime.datetime.strptime(to_val, '%Y-%m-%d').date()
             diff_days = (d2.togregorian() - d1.togregorian()).days
             if diff_days >= 0:
-                duration_str = f'{diff_days} روز'
+                duration_str = f'{convert_english_to_persian(str(diff_days))} \u200eروز'
             else:
                 duration_str = ''
     except Exception:
@@ -1394,6 +1387,7 @@ def save_edit_case(top, case_id, selected_files, entry_title, entry_date, entry_
     try:
         update_case(case_id, data)
         messagebox.showinfo('موفق', 'ویرایش ذخیره شد', parent=top)
+        top.master.deiconify()
         top.destroy()
     except Exception as e:
         messagebox.showerror('خطا', f'خطا در ذخیره: {e}', parent=top)

@@ -8,8 +8,6 @@ import csv
 import openpyxl
 from openpyxl.styles import Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
-import arabic_reshaper
-from bidi.algorithm import get_display
 from database import search_cases, delete_case, get_connection
 from ui.details_window import open_details_window
 
@@ -51,16 +49,150 @@ def calculate_duration_text(duration_from, duration_to):
         if diff_days < 0:
             return 'تاریخ پایان قبل از شروع'
         
-        return f'{diff_days} روز'
+        # Add LRM (\u200e) to fix display in Excel
+        return f'{convert_english_to_persian(str(diff_days))} \u200eروز'
     except Exception as e:
         return '-----'
+
+class CustomJalaliCalendar(ctk.CTkFrame):
+    """A custom Jalali calendar widget built with customtkinter."""
+    def __init__(self, master, on_select=None, year=None, month=None, day=None):
+        super().__init__(master)
+        self.on_select = on_select
+
+        today = jdatetime.date.today()
+        self.year = year if year else today.year
+        self.month = month if month else today.month
+        self.day = day if day else today.day
+
+        self.month_names = [
+            "فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور",
+            "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"
+        ]
+        self.weekday_names = ["ش", "ی", "د", "س", "چ", "پ", "ج"]
+
+        # --- Header: Month/Year selection ---
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.pack(pady=5, fill='x')
+        header_frame.grid_columnconfigure(1, weight=1)
+        header_frame.grid_columnconfigure(2, weight=1)
+
+        btn_prev = ctk.CTkButton(header_frame, text=">", width=30, command=self.prev_month)
+        btn_prev.grid(row=0, column=0, padx=5)
+
+        self.year_combo = ctk.CTkComboBox(header_frame, values=[str(y) for y in range(today.year - 10, today.year + 10)], command=self.update_calendar)
+        self.year_combo.set(str(self.year))
+        self.year_combo.grid(row=0, column=1, padx=5, sticky='ew')
+
+        self.month_combo = ctk.CTkComboBox(header_frame, values=self.month_names, command=self.update_calendar)
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.month_combo.grid(row=0, column=2, padx=5, sticky='ew')
+
+        btn_next = ctk.CTkButton(header_frame, text="<", width=30, command=self.next_month)
+        btn_next.grid(row=0, column=3, padx=5)
+
+        # --- Calendar Body ---
+        self.calendar_frame = ctk.CTkFrame(self)
+        self.calendar_frame.pack(expand=True, fill="both", padx=5, pady=5)
+
+        self.create_calendar()
+
+    def create_calendar(self):
+        # Clear previous widgets
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        # Weekday headers
+        for i, name in enumerate(self.weekday_names):
+            self.calendar_frame.grid_columnconfigure(i, weight=1)
+            lbl = ctk.CTkLabel(self.calendar_frame, text=name, font=('vazirmatn', 12, 'bold'))
+            lbl.grid(row=0, column=i, sticky='nsew')
+
+        # Get calendar data
+        first_day_of_month = jdatetime.date(self.year, self.month, 1)
+        start_weekday = first_day_of_month.weekday()  # jdatetime: 0=Saturday, 6=Friday. Matches our grid.
+        days_in_month = jdatetime.j_days_in_month[self.month - 1]
+        if self.month == 12 and not jdatetime.date(self.year, 1, 1).isleap():
+            days_in_month = 29
+
+        day_num = 1
+        for r in range(1, 7): # Max 6 rows
+            self.calendar_frame.grid_rowconfigure(r, weight=1)
+            for c in range(7):
+                if (r == 1 and c < start_weekday) or day_num > days_in_month:
+                    continue
+                
+                btn = ctk.CTkButton(
+                    self.calendar_frame,
+                    text=str(day_num),
+                    command=lambda d=day_num: self.select_date(d)
+                )
+                btn.grid(row=r, column=c, sticky='nsew', padx=1, pady=1)
+                day_num += 1
+
+    def update_calendar(self, event=None):
+        self.year = int(self.year_combo.get())
+        self.month = self.month_names.index(self.month_combo.get()) + 1
+        self.create_calendar()
+
+    def next_month(self):
+        self.month += 1
+        if self.month > 12:
+            self.month = 1
+            self.year += 1
+        self.year_combo.set(str(self.year))
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.update_calendar()
+
+    def prev_month(self):
+        self.month -= 1
+        if self.month < 1:
+            self.month = 12
+            self.year -= 1
+        self.year_combo.set(str(self.year))
+        self.month_combo.set(self.month_names[self.month - 1])
+        self.update_calendar()
+
+    def select_date(self, day):
+        if self.on_select:
+            date_str = f"{self.year}-{self.month:02d}-{day:02d}"
+            self.on_select(date_str)
+
+def open_calendar(master, entry_widget):
+    """Opens a Jalali calendar to select a date and inserts it into the entry_widget."""
+    def on_date_select(date_str):
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, date_str)
+        cal_win.destroy()
+        entry_widget.event_generate('<FocusOut>')
+
+    cal_win = ctk.CTkToplevel(master)
+    cal_win.title("انتخاب تاریخ")
+    cal_win.geometry("400x350")
+    cal_win.resizable(False, False)
+
+    try:
+        current_date_str = entry_widget.get()
+        year, month, day = map(int, current_date_str.split('-'))
+        cal = CustomJalaliCalendar(cal_win, on_select=on_date_select, year=year, month=month, day=day)
+    except (ValueError, IndexError):
+        cal = CustomJalaliCalendar(cal_win, on_select=on_date_select)
+
+    cal.pack(pady=10, padx=10, fill="both", expand=True)
 
 
 def open_search_records(master):
     """Open the Search Records window as a Toplevel and provide search UI."""
+    master.withdraw()
     top = ctk.CTkToplevel(master)
-    top.title('🔍 جستجوی پرونده‌ها — سیستم مدیریت پرونده مهاجر')
-    top.geometry('1450x600')
+    top.title('جستجوی پرونده‌ها — سیستم مدیریت پرونده مهاجر')
+    top.geometry('1460x600')
+
+    def on_close():
+        master.deiconify()
+        top.destroy()
+    
+    top.protocol("WM_DELETE_WINDOW", on_close)
 
     # --- RTL Layout Configuration ---
     top.grid_columnconfigure(0, weight=1)  # Main content expands
@@ -71,22 +203,22 @@ def open_search_records(master):
     # --- Top Control Bar (Frame for all controls) ---
     control_frame = ctk.CTkFrame(top)
     control_frame.grid(row=0, column=0, sticky='ew', padx=pad, pady=pad)
-    control_frame.grid_columnconfigure(4, weight=1)  # Search entry expands
+    control_frame.grid_columnconfigure(4, weight=1)  # Spacer expands
 
     # Left side buttons (right-to-left: delete, text, csv)
-    btn_delete = ctk.CTkButton(control_frame, text='🗑️ حذف پرونده', command=lambda: delete_selected_records(), font=('vazirmatn', 11, 'bold'), state="disabled")
+    btn_delete = ctk.CTkButton(control_frame, text='حذف پرونده', command=lambda: delete_selected_records(), font=('vazirmatn', 11, 'bold'), state="disabled")
     btn_delete.grid(row=0, column=0, padx=(0, pad))
 
-    btn_export_xlsx = ctk.CTkButton(control_frame, text='📄 خروجی فایل XLSX', font=('vazirmatn', 11, 'bold'), state="disabled")
+    btn_export_xlsx = ctk.CTkButton(control_frame, text='خروجی فایل XLSX', font=('vazirmatn', 11, 'bold'), state="disabled")
     btn_export_xlsx.grid(row=0, column=1, padx=(0, pad))
 
     # Search button
-    btn_search = ctk.CTkButton(control_frame, text='🔍 جستجوی پرونده ها', command=lambda: do_search(), font=('vazirmatn', 11, 'bold'))
+    btn_search = ctk.CTkButton(control_frame, text='جستجوی پرونده ها', command=lambda: do_search(), font=('vazirmatn', 11, 'bold'))
     btn_search.grid(row=0, column=3, padx=(0, pad))
 
-    # Search entry (column 2 - expands)
-    entry_q = ctk.CTkEntry(control_frame, width=400, justify='right', font=('vazirmatn', 12))
-    entry_q.grid(row=0, column=4, padx=(pad, 2), sticky='ew')
+    # Search entry (column 5 - spans date area)
+    entry_q = ctk.CTkEntry(control_frame, width=750, justify='right', font=('vazirmatn', 12))
+    entry_q.grid(row=0, column=5, columnspan=8, padx=(pad, 2), sticky='ew')
 
     def on_filter_change(choice):
         """Show/hide date entries based on filter selection."""
@@ -94,27 +226,42 @@ def open_search_records(master):
         if selected_filter == 'بر اساس تاریخ':
             # Show date entries, hide text entry
             entry_q.grid_remove()
-            # لیبل‌ها و entries در columns مختلف
-            lbl_date_to.grid(row=0, column=4, padx=(0, 2), sticky='e')
-            entry_date_to.grid(row=0, column=5, padx=(2, pad), sticky='w')
-            lbl_date_from.grid(row=0, column=6, padx=(0, 2), sticky='e')
-            entry_date_from.grid(row=0, column=7, padx=(2, pad), sticky='w')
+            
+            # RTL Layout: [Entry][Today][Cal][Label]
+            
+            # To Date Block (Left) - Cols 5, 6, 7, 8
+            entry_date_to.grid(row=0, column=5, padx=(2, 2), sticky='ew')
+            btn_today_to.grid(row=0, column=6, padx=(2, 2), sticky='ew')
+            btn_cal_to.grid(row=0, column=7, padx=(2, 2), sticky='ew')
+            lbl_date_to.grid(row=0, column=8, padx=(2, 15), sticky='e') # Extra pad to separate blocks
+
+            # From Date Block (Right) - Cols 9, 10, 11, 12
+            entry_date_from.grid(row=0, column=9, padx=(2, 2), sticky='ew')
+            btn_today_from.grid(row=0, column=10, padx=(2, 2), sticky='ew')
+            btn_cal_from.grid(row=0, column=11, padx=(2, 2), sticky='ew')
+            lbl_date_from.grid(row=0, column=12, padx=(2, 0), sticky='e')
+            
         else:
             # Show text entry, hide date entries
             entry_q.grid()
             lbl_date_from.grid_remove()
             entry_date_from.grid_remove()
+            btn_cal_from.grid_remove()
+            btn_today_from.grid_remove()
+
             lbl_date_to.grid_remove()
             entry_date_to.grid_remove()
+            btn_cal_to.grid_remove()
+            btn_today_to.grid_remove()
 
     # Combobox filter
     combo = ctk.CTkComboBox(control_frame, values=['جستجوی کلی', 'بر اساس عنوان', 'بر اساس موضوع', 'بر اساس تاریخ', 'بر اساس نوع پرونده', 'بر اساس شناسه بایگانی'], font=('vazirmatn', 12, 'bold'), width=150, state='readonly', command=on_filter_change)
     combo.set('جستجوی کلی')  # Set to "جستجوی کلی" as default
-    combo.grid(row=0, column=8, padx=(pad, 0))
+    combo.grid(row=0, column=13, padx=(pad, 0))
 
     # Filter label
     lbl_filter = ctk.CTkLabel(control_frame, text='نوع فیلتر', font=('vazirmatn', 12, 'bold'))
-    lbl_filter.grid(row=0, column=9, padx=(pad, 0))
+    lbl_filter.grid(row=0, column=14, padx=(pad, 0))
 
     def normalize_date_input(event):
         widget = event.widget
@@ -125,13 +272,21 @@ def open_search_records(master):
             widget.insert(0, new_text)
 
     # --- Date range entries (hidden by default) ---
-    entry_date_from = ctk.CTkEntry(control_frame, width=150, justify='right', font=('vazirmatn', 12))
+    # From Date controls
+    entry_date_from = ctk.CTkEntry(control_frame, width=120, justify='right', font=('vazirmatn', 12))
     entry_date_from.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_date_from.bind('<KeyRelease>', normalize_date_input)
     
-    entry_date_to = ctk.CTkEntry(control_frame, width=150, justify='right', font=('vazirmatn', 12))
+    btn_today_from = ctk.CTkButton(control_frame, text='امروز', command=lambda: (entry_date_from.delete(0, tk.END), entry_date_from.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=50)
+    btn_cal_from = ctk.CTkButton(control_frame, text='تقویم', command=lambda: open_calendar(top, entry_date_from), width=40, font=('vazirmatn', 11, 'bold'))
+    
+    # To Date controls
+    entry_date_to = ctk.CTkEntry(control_frame, width=120, justify='right', font=('vazirmatn', 12))
     entry_date_to.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))
     entry_date_to.bind('<KeyRelease>', normalize_date_input)
+    
+    btn_today_to = ctk.CTkButton(control_frame, text='امروز', command=lambda: (entry_date_to.delete(0, tk.END), entry_date_to.insert(0, jdatetime.date.today().strftime('%Y-%m-%d'))), font=('vazirmatn', 11, 'bold'), width=50)
+    btn_cal_to = ctk.CTkButton(control_frame, text='تقویم', command=lambda: open_calendar(top, entry_date_to), width=40, font=('vazirmatn', 11, 'bold'))
     
     lbl_date_from = ctk.CTkLabel(control_frame, text='از تاریخ', font=('vazirmatn', 11, 'bold'))
     lbl_date_to = ctk.CTkLabel(control_frame, text='تا تاریخ', font=('vazirmatn', 11, 'bold'))
@@ -485,7 +640,8 @@ def open_search_records(master):
                                  right=Side(style='thin'), 
                                  top=Side(style='thin'), 
                                  bottom=Side(style='thin'))
-            center_alignment = Alignment(horizontal='center', vertical='center')
+            # readingOrder=2 forces RTL direction in the cell, which fixes display on Windows
+            center_alignment = Alignment(horizontal='center', vertical='center', readingOrder=2)
 
             # --- Fetch full data for XLSX export ---
             case_ids = [str(row[0]) for row in current_data['rows']]
@@ -532,11 +688,10 @@ def open_search_records(master):
                 persian_headers.insert(duration_index, 'مدت')
             persian_headers.insert(0, 'ردیف') # Add Row column header
             
-            reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in persian_headers]
-            sheet.append(reshaped_headers)
+            sheet.append(persian_headers)
 
             # Style Header
-            for col_num, header in enumerate(reshaped_headers, 1):
+            for col_num, header in enumerate(persian_headers, 1):
                 cell = sheet.cell(row=1, column=col_num)
                 cell.font = bold_font
                 cell.border = thin_border
@@ -557,7 +712,7 @@ def open_search_records(master):
                 filtered_row.insert(0, row_idx - 1)
 
                 # Reshape for display
-                reshaped_row = [get_display(arabic_reshaper.reshape(str(item) if item is not None else '')) for item in filtered_row]
+                reshaped_row = [str(item) if item is not None else '' for item in filtered_row]
                 sheet.append(reshaped_row)
 
                 # Apply font, border, and alignment to data cells

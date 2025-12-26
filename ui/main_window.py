@@ -21,15 +21,13 @@ def create_main_window():
 
     # Load and display the logo above the header
     try:
+        # Use relative path assuming CWD is project root (set in main.py)
         logo_path = os.path.join('assets', 'icons', 'logo1.png')
+        
         # Use PIL for better image handling in ctk
         my_image = ctk.CTkImage(light_image=Image.open(logo_path),
                                 dark_image=Image.open(logo_path),
-                                size=(130, 150)) # Approx size based on subsample(6,6) of original if it was large
-        
-        # Original code used subsample(6,6). Let's assume original was ~600x600 -> 100x100.
-        # If we don't know original size, we can try to guess or just use a reasonable size.
-        # Let's stick to a reasonable icon size.
+                                size=(130, 150))
         
         logo_label = ctk.CTkLabel(app, image=my_image, text="")
         logo_label.pack(pady=(20, 10))
@@ -41,20 +39,13 @@ def create_main_window():
     header = ctk.CTkLabel(app, text='سیستم مدیریت پرونده مهاجر', font=('vazirmatn', 23, 'bold'))
     header.pack(pady=(10, 5))
 
-    frm = ctk.CTkFrame(app)
-    frm.pack(padx=20, pady=12, fill='both', expand=True)
-
-    # Width 30 chars ~ 300px? 
-    # Height 2 chars ~ 50-60px?
-    # ctk button height default is usually around 28-32. 
-    # Let's use width=250, height=50 for a big button feel.
-    
-    btn_new = ctk.CTkButton(frm, text='➕  افزودن پرونده جدید', font=('vazirmatn', 13, 'bold'), width=250, height=50,
+    # Buttons directly in app (no frame)
+    btn_new = ctk.CTkButton(app, text='افزودن پرونده جدید', font=('vazirmatn', 13, 'bold'), width=250, height=50,
                         command=lambda: open_add_record(app))
-    btn_search = ctk.CTkButton(frm, text='🔍  جستجوی پرونده‌ها', font=('vazirmatn', 13, 'bold'), width=250, height=50,
+    btn_search = ctk.CTkButton(app, text='جستجوی پرونده‌ها', font=('vazirmatn', 13, 'bold'), width=250, height=50,
                           command=lambda: open_search_records(app))
     
-    btn_new.pack(pady=10)
+    btn_new.pack(pady=20)
     btn_search.pack(pady=10)
 
     # Footer labels

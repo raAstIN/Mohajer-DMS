@@ -23,9 +23,16 @@ def get_jalali_day_name(date_str):
 
 def open_details_window(master, case_id):
     """Open a Details window for a given case_id (function-based)."""
+    master.withdraw()
     top = ctk.CTkToplevel(master)
     top.title(f'جزئیات پرونده {case_id} — سیستم مدیریت پرونده مهاجر')
     top.geometry('800x600')
+
+    def on_close():
+        master.deiconify()
+        top.destroy()
+    
+    top.protocol("WM_DELETE_WINDOW", on_close)
 
     # Remove single-line header; present fields as label:value rows (RTL)
     info = ctk.CTkFrame(top)
@@ -314,7 +321,30 @@ def open_details_window(master, case_id):
 
     def edit():
         # Open the unified edit/create window prefilled with current case data
+        # Pass 'top' (Details Window) as parent, so when Edit closes, Details reopens.
+        # Withdraw 'top' immediately.
+        # We also need to refresh data when 'top' comes back.
+        top.withdraw()
         open_edit_record(top, case_id)
+        
+    def on_show(event):
+        if event.widget == top and top.state() == 'normal':
+             # Refresh data when window is shown again
+             loaded_data, loaded_bank_info = load()
+             # We might need to update btn states if data changed (e.g. bank info added)
+             if loaded_data:
+                # Update bank button state
+                 has_bi = any([loaded_bank_info['owner_name'], loaded_bank_info['account_number'], 
+                                 loaded_bank_info['shaba_number'], loaded_bank_info['card_number'], 
+                                 loaded_bank_info['bank_name'], loaded_bank_info['bank_branch'], 
+                                 loaded_bank_info['payment_id']])
+                 btn_bank.configure(state="normal" if has_bi else "disabled")
+                 
+                 # Update guarantee button state
+                 has_gi = any([loaded_data.get('guarantee_amount'), loaded_data.get('guarantee_type')])
+                 btn_guarantee.configure(state="normal" if has_gi else "disabled")
+
+    top.bind("<Map>", on_show)
 
     def delete():
         if not messagebox.askyesno('تایید', 'آیا از حذف این پرونده مطمئن هستید؟'):
@@ -322,6 +352,7 @@ def open_details_window(master, case_id):
         try:
             delete_case(case_id)
             messagebox.showinfo('موفق', 'پرونده حذف شد')
+            master.deiconify()
             top.destroy()
         except Exception as e:
             messagebox.showerror('خطا در حذف', f'{e}')
@@ -336,11 +367,11 @@ def open_details_window(master, case_id):
     has_guarantee_info = any([data.get('guarantee_amount'), data.get('guarantee_type')])
     guarantee_btn_state = "normal" if has_guarantee_info else "disabled"
 
-    btn_open = ctk.CTkButton(frm, text='🗂 باز کردن فولدر پیوست‌ها', command=open_folder, font=('vazirmatn', 13, 'bold'))
-    btn_bank = ctk.CTkButton(frm, text='🏦 اطلاعات بانکی', command=open_bank_info_window, font=('vazirmatn', 13, 'bold'), state=bank_btn_state)
-    btn_guarantee = ctk.CTkButton(frm, text='🛡️ اطلاعات تضمین', command=open_guarantee_info_window, font=('vazirmatn', 13, 'bold'), state=guarantee_btn_state)
-    btn_edit = ctk.CTkButton(frm, text='📝 ویرایش پرونده', command=edit, font=('vazirmatn', 13, 'bold'))
-    btn_del = ctk.CTkButton(frm, text='🗑 حذف پرونده', command=delete, font=('vazirmatn', 13, 'bold'), fg_color="red", hover_color="darkred")
+    btn_open = ctk.CTkButton(frm, text='باز کردن فولدر پیوست‌ها', command=open_folder, font=('vazirmatn', 13, 'bold'))
+    btn_bank = ctk.CTkButton(frm, text='اطلاعات بانکی', command=open_bank_info_window, font=('vazirmatn', 13, 'bold'), state=bank_btn_state)
+    btn_guarantee = ctk.CTkButton(frm, text='اطلاعات تضمین', command=open_guarantee_info_window, font=('vazirmatn', 13, 'bold'), state=guarantee_btn_state)
+    btn_edit = ctk.CTkButton(frm, text='ویرایش پرونده', command=edit, font=('vazirmatn', 13, 'bold'))
+    btn_del = ctk.CTkButton(frm, text='حذف پرونده', command=delete, font=('vazirmatn', 13, 'bold'), fg_color="red", hover_color="darkred")
     
     btn_open.grid(row=0, column=0, padx=6)
     btn_bank.grid(row=0, column=1, padx=6)

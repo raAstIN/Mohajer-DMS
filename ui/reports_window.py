@@ -7,18 +7,35 @@ import csv
 import openpyxl
 from openpyxl.styles import Font, Border, Side, Alignment
 from openpyxl.utils import get_column_letter
-import arabic_reshaper
-from bidi.algorithm import get_display
 
 import tempfile
 from database import get_connection
 
+PERSIAN_TO_ENGLISH_MAP = {
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9'
+}
+
+def convert_english_to_persian(text):
+    """Converts English numerals in a string to Persian numerals."""
+    text = str(text)
+    english_to_persian_map = {v: k for k, v in PERSIAN_TO_ENGLISH_MAP.items()}
+    for e, p in english_to_persian_map.items():
+        text = text.replace(e, p)
+    return text
 
 def open_reports_window(master):
     """Open the Reports window for filtering cases by date range and exporting to PDF."""
+    master.withdraw()
     top = ctk.CTkToplevel(master)
     top.title('📊 گزارش گیری — سیستم مدیریت پرونده مهاجر')
     top.geometry('1150x600')
+
+    def on_close():
+        master.deiconify()
+        top.destroy()
+    
+    top.protocol("WM_DELETE_WINDOW", on_close)
 
     # --- Simple Grid Layout (RTL) ---
     top.grid_columnconfigure(0, weight=1)  # Flexible space (right side in RTL)
@@ -270,11 +287,10 @@ def open_reports_window(master):
 
             headers = ['شناسه بایگانی', 'عنوان', 'موضوع', 'تاریخ', 'نوع پرونده', 'مدت', 'مبلغ قرارداد']
             headers.insert(0, 'ردیف') # Add Row column header
-            reshaped_headers = [get_display(arabic_reshaper.reshape(h)) for h in headers]
-            sheet.append(reshaped_headers)
+            sheet.append(headers)
 
             # Apply style to header
-            for col_num, header in enumerate(reshaped_headers, 1):
+            for col_num, header in enumerate(headers, 1):
                 cell = sheet.cell(row=1, column=col_num)
                 cell.font = bold_font
                 cell.border = thin_border
@@ -284,7 +300,7 @@ def open_reports_window(master):
             for row_idx, row in enumerate(rows_to_export, start=2):
                 # Add row number to the start of the row data
                 row_with_num = [row_idx - 1] + list(row)
-                reshaped_row = [get_display(arabic_reshaper.reshape(str(item) if item is not None else '')) for item in row_with_num]
+                reshaped_row = [convert_english_to_persian(str(item) if item is not None else '') for item in row_with_num]
                 sheet.append(reshaped_row)
                 for col_idx, _ in enumerate(reshaped_row, 1):
                     cell = sheet.cell(row=row_idx, column=col_idx)
